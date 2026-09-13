@@ -1,0 +1,15 @@
+# Dependencies for the Streamlit demo only. Deliberately NOT the project's
+# root requirements.txt, which also carries training/analysis packages
+# (dbt, optuna, matplotlib, torch) this app never imports and which would
+# make a free-tier deploy slow or fail outright.
+#
+# Versions are pinned to match requirements-serve.txt exactly: the model
+# artifact was pickled under these, and unpickling under different
+# scikit-learn/xgboost versions is the classic way to get either a hard
+# failure or, worse, silently different predictions.
+streamlit==1.63.0
+numpy==2.5.3
+pandas==3.0.5
+scikit-learn==1.9.0
+joblib==1.6.0
+xgboost==3.4.1

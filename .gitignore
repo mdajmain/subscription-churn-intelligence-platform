@@ -9,7 +9,9 @@ venv/
 dbt_packages/
 target/
 logs/
-models/artifacts/
+models/artifacts/*
+# committed (1.5MB) so the Streamlit demo can load a model when deployed
+!models/artifacts/churn_model.joblib
 models/tensors/
 agent/logs/
 .DS_Store
