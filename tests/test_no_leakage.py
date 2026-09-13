@@ -13,6 +13,14 @@ after its prediction cutoff. This is checked two ways:
    discipline actually did anything (test_leaky_window_would_be_caught).
 """
 
+# Queries fct_prediction, not the Week 3 fct_features table it replaced.
+# fct_features was built by sql/build_features.py before the Week 4 dbt
+# migration; dbt has no such model, so it exists only on databases old
+# enough to predate the migration -- which is why this test passed locally
+# for months and failed the first time CI ran it on a fresh Postgres.
+# fct_prediction is the ported successor (same grain, same 42,813 rows,
+# and the version with the fct_transaction dedup fix applied).
+
 import os
 import random
 
@@ -32,15 +40,31 @@ def conn():
 @pytest.fixture(scope="module")
 def sample_rows(conn):
     with conn.cursor() as cur:
-        cur.execute("SELECT count(*) FROM fct_features")
+        cur.execute("SELECT count(*) FROM fct_prediction")
         (n,) = cur.fetchone()
-        cur.execute("SELECT msno, cutoff_date FROM fct_features ORDER BY random() LIMIT %s", (min(500, n),))
+        cur.execute("SELECT msno, cutoff_date FROM fct_prediction ORDER BY random() LIMIT %s", (min(500, n),))
         return cur.fetchall()
+
+
+# These recompute against the same base relations fct_prediction.sql uses
+# (fct_activity_daily, fct_transaction), not the raw user_logs/transactions
+# tables the pre-dbt sql/build_features.py read. What this test exists to
+# verify independently is the CUTOFF discipline -- the `< cutoff` vs
+# `<= cutoff` filter below -- so the recomputation has to start from the
+# same rows the pipeline does, or it measures a definition difference
+# instead of a leak.
+#
+# Using raw `transactions` for the renewal count was in fact the Week 3
+# definition, and it disagrees with the current one on 147 of 500 sampled
+# rows: the Week 4 dbt migration deliberately standardised prior-history
+# counts on the DEDUPED fct_transaction (the raw table carries 760 exact
+# duplicate rows, found in Week 1). That fix is what this test was still
+# contradicting.
 
 
 def recompute_total_secs_30d(cur, msno, cutoff_date, operator):
     cur.execute(f"""
-        SELECT COALESCE(sum(total_secs), 0) FROM user_logs
+        SELECT COALESCE(sum(total_secs), 0) FROM fct_activity_daily
         WHERE msno = %s AND date {operator} %s AND date >= %s - 30
     """, (msno, cutoff_date, cutoff_date))
     return float(cur.fetchone()[0])
@@ -48,7 +72,7 @@ def recompute_total_secs_30d(cur, msno, cutoff_date, operator):
 
 def recompute_prior_renewal_count(cur, msno, cutoff_date, operator):
     cur.execute(f"""
-        SELECT count(*) FROM transactions
+        SELECT count(*) FROM fct_transaction
         WHERE msno = %s AND transaction_date {operator} %s AND is_cancel = 0
     """, (msno, cutoff_date))
     return cur.fetchone()[0]
@@ -58,7 +82,7 @@ def test_last_activity_date_before_cutoff(conn):
     """No stored last_activity_date may fall on or after its own cutoff."""
     with conn.cursor() as cur:
         cur.execute("""
-            SELECT count(*) FROM fct_features
+            SELECT count(*) FROM fct_prediction
             WHERE last_activity_date IS NOT NULL AND last_activity_date >= cutoff_date
         """)
         (violations,) = cur.fetchone()
@@ -70,7 +94,7 @@ def test_features_match_strict_recompute(conn, sample_rows):
     with conn.cursor() as cur:
         mismatches = []
         for msno, cutoff_date in sample_rows:
-            cur.execute("SELECT total_secs_30d, prior_renewal_count FROM fct_features WHERE msno=%s AND cutoff_date=%s", (msno, cutoff_date))
+            cur.execute("SELECT total_secs_30d, prior_renewal_count FROM fct_prediction WHERE msno=%s AND cutoff_date=%s", (msno, cutoff_date))
             stored_secs, stored_renewals = cur.fetchone()
             recomputed_secs = recompute_total_secs_30d(cur, msno, cutoff_date, "<")
             recomputed_renewals = recompute_prior_renewal_count(cur, msno, cutoff_date, "<")
@@ -90,7 +114,7 @@ def test_leaky_window_would_be_caught(conn, sample_rows):
     with conn.cursor() as cur:
         leaked = 0
         for msno, cutoff_date in sample_rows:
-            cur.execute("SELECT total_secs_30d, prior_renewal_count FROM fct_features WHERE msno=%s AND cutoff_date=%s", (msno, cutoff_date))
+            cur.execute("SELECT total_secs_30d, prior_renewal_count FROM fct_prediction WHERE msno=%s AND cutoff_date=%s", (msno, cutoff_date))
             stored_secs, stored_renewals = cur.fetchone()
             leaky_secs = recompute_total_secs_30d(cur, msno, cutoff_date, "<=")
             leaky_renewals = recompute_prior_renewal_count(cur, msno, cutoff_date, "<=")
