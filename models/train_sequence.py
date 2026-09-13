@@ -67,12 +67,18 @@ def load_tensor_split(name):
 
 
 def load_tabular_aligned(keys):
-    """Load fct_features rows for exactly the (msno, cutoff_date) pairs in
-    `keys`, in that same order, so tensor rows and tabular rows line up."""
+    """Load fct_prediction rows for exactly the (msno, cutoff_date) pairs in
+    `keys`, in that same order, so tensor rows and tabular rows line up.
+
+    fct_prediction, not the Week 3 fct_features table it replaced -- dbt
+    has no fct_features model, so that name resolves only on databases
+    predating the Week 4 migration. The assert below is what actually
+    guards this: if the two ever disagreed on grain, the join would drop or
+    duplicate rows against the tensor split and fail loudly."""
     conn = psycopg2.connect(DB_DSN)
     df = pd.read_sql(f"""
         SELECT msno, cutoff_date, {", ".join(ALL_FEATURES)}
-        FROM fct_features WHERE churn IS NOT NULL
+        FROM fct_prediction WHERE churn IS NOT NULL
     """, conn, parse_dates=["cutoff_date"])
     conn.close()
     df["gender"] = df["gender"].fillna("missing")
