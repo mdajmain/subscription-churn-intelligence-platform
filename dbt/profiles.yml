@@ -23,3 +23,20 @@ churn_platform:
       dbname: "{{ env_var('CHURN_DB_NAME', 'churn') }}"
       schema: test
       threads: 4
+    # AWS_DEPLOYMENT_WALKTHROUGH.md step 6 — the RDS deploy target. Added
+    # because `dev` hardcodes host: localhost (doesn't read CHURN_DB_DSN,
+    # so "dbt build --target dev" against RDS would silently build against
+    # the LOCAL database instead) and `ci`'s schema is `test`, disconnected
+    # from sources.yml's hardcoded `public` schema that the raw tables
+    # actually load into. `prod` reuses `dev`'s schema (public) so marts
+    # land where `api/batch_score.py` and the agent views expect them, but
+    # reads connection details from env vars like `ci` does.
+    prod:
+      type: postgres
+      host: "{{ env_var('CHURN_DB_HOST') }}"
+      port: 5432
+      user: "{{ env_var('CHURN_DB_USER', 'churn') }}"
+      pass: "{{ env_var('CHURN_DB_PASSWORD') }}"
+      dbname: "{{ env_var('CHURN_DB_NAME', 'churn') }}"
+      schema: public
+      threads: 4
