@@ -24,10 +24,12 @@ the numbers are still in front of me.
   degrading ranking quality on a small validation set before shipping it.
 - Containerized a FastAPI scoring service (`/predict`, `/metrics`,
   `/health`) with an idempotent daily batch job (proven by an automated
-  replay test), CI (pytest -> dbt build -> Docker build), and Terraform
-  for the full AWS deploy path (billing alarm, RDS, ECS Fargate,
-  EventBridge) — architected for a sub-$20/month student budget by
-  deliberately omitting a NAT gateway.
+  replay test) and CI (pytest -> dbt build -> Docker build); deployed the
+  full stack to AWS with Terraform (VPC, RDS, ECS Fargate, ECR,
+  EventBridge, a CloudWatch billing alarm) and verified it live end-to-end
+  — a real subscriber scored through the running service, a scheduled
+  batch task triggered and confirmed — then tore it down; architected for
+  a sub-$20/month student budget by deliberately omitting a NAT gateway.
 - Built a bounded, read-only LLM investigation agent (4 tools, database-
   enforced least-privilege access, per-query timeouts, full logged
   traces) that separates data-quality issues from observed changes from
