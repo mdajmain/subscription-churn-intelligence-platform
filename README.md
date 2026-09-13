@@ -1,5 +1,10 @@
 # Subscription Churn Intelligence Platform
 
+**▶ [Try the live churn-risk calculator](https://subscription-churn-intelligence-platform-c4hxjbhnr9jzqe4t7f4vd.streamlit.app/)** — enter a subscriber's
+plan and usage, get their calibrated 30-day churn probability plus the three factors that drove
+it. Runs the same trained model artifact and the same scoring path (`api/scoring.py`) as the
+FastAPI service and the nightly batch job, so it cannot silently disagree with them.
+
 ## Business question
 
 Which subscribers are likely not to renew, how much subscription revenue is exposed, and which segments should the retention team review first?
@@ -53,6 +58,10 @@ churn-platform/
   models/
   api/
   tests/
+  agent/        # read-only LLM investigation agent
+  dbt/          # the transformation pipeline of record
+  infra/        # Terraform for the AWS deployment
+  streamlit_demo/  # the public churn-risk calculator
   data/         # gitignored — synthetic CSVs + ground truth
 ```
 
@@ -294,15 +303,28 @@ itself). `tests/test_idempotency.py` replays the same date twice and
 asserts the row count and values are unchanged, not doubled — the guide's
 explicit ask for step 7.3.
 
-**7.2 AWS — built, deliberately not deployed.** `infra/` (Terraform):
-billing alarm first, S3 for artifacts, RDS `db.t3.micro` in a public
-subnet with a locked-down security group (no NAT gateway — the single
-largest deliberate cost decision, stated not hidden), ECR, ECS Fargate
-(one API task + a second task definition for the batch job), EventBridge
-schedule. `terraform validate` passes; nothing has been `plan`ned or
-`apply`ed against the live AWS account this was built against — see
-`infra/README.md` for the full deploy order and why deploying needs a
-separate explicit go-ahead rather than happening automatically.
+**7.2 AWS — deployed, verified end-to-end, then torn down.** `infra/`
+(Terraform): billing alarm first, S3 for artifacts, RDS `db.t3.micro` in
+a public subnet with a locked-down security group (no NAT gateway — the
+single largest deliberate cost decision, stated not hidden), ECR, ECS
+Fargate (one API task + a second task definition for the batch job),
+EventBridge schedule. 34 resources applied for real; the API served a
+live `/predict` against a real subscriber from RDS, and the scheduled
+batch task ran to a clean exit. Then destroyed and independently
+verified gone (`head-bucket` → 404, `describe-repositories` →
+`RepositoryNotFoundException`, empty `terraform state list`) — the stack
+is a demonstrated capability, not something left billing.
+
+Applying it found five things `terraform validate` cannot catch, all of
+which had been sitting in this repo undetected:
+
+| Found only by deploying | Why `validate` missed it |
+|---|---|
+| IAM user lacked create permissions for EC2/S3/ECR/ECS/EventBridge | `validate` makes no AWS API calls |
+| Image built `arm64` on Apple Silicon; Fargate expects `linux/amd64` | Not a Terraform concern |
+| `dbt build --target dev` silently builds against **localhost**, not RDS | `dev` hardcodes its host; added a `prod` target |
+| `mart_risk_exposure` ↔ `score_predictions.py` circular dependency | Only surfaces against a genuinely empty database |
+| `*.tfplan` not gitignored — a saved plan embeds `db_password` in cleartext | Not a schema error |
 
 **7.3 CI** (`.github/workflows/ci.yml`): `pytest` -> `dbt build` against
 an isolated `test` schema (the `ci` dbt target added specifically for
@@ -315,12 +337,47 @@ explicitly as "the kind of thing people claim and rarely verify."
 **7.4 Scaling benchmark** (`scripts/scaling_benchmark.py` ->
 `notebooks/12_scaling_benchmark.md`): reruns ingest -> load -> `dbt
 build` at 3%/10%/25% of the full 6,000-user dataset, measured locally
-(labeled as a local proxy with an *estimated* Fargate cost — nothing ran
-on actual AWS, consistent with 7.2). 8.3x more users (180 -> 1,500) took
+(labeled as a local proxy with an *estimated* Fargate cost — these timings
+were taken on a laptop, not on the Fargate deployment described in 7.2,
+and are not restated as measured cloud figures). 8.3x more users (180 -> 1,500) took
 1.8x longer end-to-end — sub-linear over this range, consistent with the
 Week 4 indexing fix keeping `fct_prediction`'s correlated subqueries from
 scaling badly. The script regenerates and restores the full dataset
 afterward rather than leaving the database at a sampled-down state.
+
+## Live demo — churn-risk calculator (`streamlit_demo/`)
+
+**[subscription-churn-intelligence-platform…streamlit.app](https://subscription-churn-intelligence-platform-c4hxjbhnr9jzqe4t7f4vd.streamlit.app/)**
+
+A Streamlit front end aimed at someone who will never read this README: enter a
+subscriber's plan, price, tenure and usage, get a calibrated 30-day churn probability,
+a risk tier, the 30-day revenue at stake, and the three factors that moved the
+prediction most. Four presets load a realistic subscriber so there's nothing to fill
+in to see it work.
+
+It scores through `api/scoring.py`'s `score_rows()` rather than re-implementing
+preprocessing, so the app, the FastAPI service and the batch job cannot drift apart in
+what they'd predict for the same subscriber. Derived features (`discount`,
+`activity_ratio_7d_to_30d_avg`, the play-share columns) use the same definitions as
+`dbt/models/marts/fct_prediction.sql`.
+
+**One modelling subtlety the UI handles explicitly.** "We have usage data and it shows
+zero" and "we have no usage data at all" are very different to this model, and
+correctly so: rows with `missing_activity_flag` churn at **7.8%** in training — the base
+rate — because missing logs mean missing *data*, not a disengaged subscriber. Zero
+*recorded* usage scores ~83%; the same inputs with the missing-data flag set score ~9%.
+The app asks which case applies instead of inferring one from the other, which would
+invert the prediction. An earlier version of the app got this wrong, which is how the
+behaviour got measured in the first place.
+
+`streamlit_demo/requirements.txt` is deliberately separate from the root
+`requirements.txt` (which carries dbt/optuna/torch, none of which this app imports), and
+pins `scikit-learn`/`xgboost` to the versions the artifact was pickled under —
+unpickling under different versions risks silently different predictions.
+
+```bash
+streamlit run streamlit_demo/streamlit_app.py   # no database required
+```
 
 ## Investigation agent, model card, architecture (Week 8)
 

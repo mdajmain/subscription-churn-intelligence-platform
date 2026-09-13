@@ -44,12 +44,33 @@ jobs:
           python3 ingest/generate_synthetic_data.py
           python3 ingest/load_to_postgres.py
 
-      - name: dbt build (dev target — populates the tables the app and tests read)
+      - name: dbt build, pass 1 (everything that doesn't need model_predictions yet)
         working-directory: dbt
-        run: dbt build --target dev
+        run: dbt build --target dev --exclude source:ml+
+        # There is a genuine circular dependency between dbt and the scoring
+        # job: mart_risk_exposure (and the 3 not_null tests on the
+        # ml.model_predictions source) need model_predictions, which
+        # models/score_predictions.py writes -- but that script reads
+        # fct_prediction, which this build creates. So the build runs in two
+        # passes with scoring in between.
+        #
+        # `--exclude source:ml+` skips exactly those 8 nodes (the source, its
+        # 3 tests, mart_risk_exposure and its 3 tests) and nothing else, so a
+        # failure anywhere else still fails this step loudly. Tolerating a
+        # non-zero exit here instead would mask real breakage.
+        #
+        # This only ever surfaces against a genuinely empty database: locally
+        # model_predictions already exists from a previous run, which is why
+        # it went unnoticed until CI ran on a fresh Postgres service.
 
       - name: Train, calibrate, and score the model (produces the artifact api/ and the tests need)
         run: python3 models/score_predictions.py
+
+      - name: dbt build, pass 2 (full build — model_predictions now exists)
+        working-directory: dbt
+        run: dbt build --target dev
+        # No exclusions and no tolerated failures: by this point every source
+        # exists, so anything red here is a real problem.
 
       - name: pytest
         run: pytest tests/ -v
