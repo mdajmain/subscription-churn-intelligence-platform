@@ -56,9 +56,13 @@ ALL_FEATURES = NUMERIC + BOOLEAN + CATEGORICAL
 
 def load_data():
     conn = psycopg2.connect(DB_DSN)
+    # fct_prediction, not the Week 3 fct_features table it replaced: dbt has
+    # no fct_features model, so that name resolves only on databases predating
+    # the Week 4 migration. Same grain and same 31 columns; `churn IS NOT NULL`
+    # continues to mean "label resolved, not right-censored".
     df = pd.read_sql(f"""
         SELECT msno, cutoff_date, churn, {", ".join(ALL_FEATURES)}
-        FROM fct_features WHERE churn IS NOT NULL
+        FROM fct_prediction WHERE churn IS NOT NULL
     """, conn)
     conn.close()
     df["cutoff_date"] = pd.to_datetime(df["cutoff_date"])
@@ -105,7 +109,7 @@ def evaluate(name, y_true, y_score):
 
 
 def main():
-    print("Loading fct_features...")
+    print("Loading fct_prediction...")
     df = load_data()
     train, val, test = split(df)
     print(f"train={len(train):,} (churn={train.churn.mean():.1%})  "
