@@ -72,6 +72,23 @@ jobs:
         # No exclusions and no tolerated failures: by this point every source
         # exists, so anything red here is a real problem.
 
+      - name: Create the agent's read-only views and role
+        run: |
+          python3 -c "
+          import psycopg2, os
+          conn = psycopg2.connect(os.environ['CHURN_DB_DSN'])
+          conn.autocommit = True
+          conn.cursor().execute(open('sql/agent_views.sql').read())
+          conn.cursor().execute(open('sql/agent_grants.sql').read())
+          print('agent views + grants applied')
+          "
+        # tests/test_agent_tools.py connects as agent_readonly and queries the
+        # four v_* views, so both files have to run before pytest. They were
+        # missing from this workflow entirely -- another thing that only shows
+        # up on a fresh database, since locally the views already existed.
+        # Must come after the dbt builds above: the views are defined over the
+        # marts, and dbt's drop-and-recreate takes dependent views with it.
+
       - name: pytest
         run: pytest tests/ -v
 
