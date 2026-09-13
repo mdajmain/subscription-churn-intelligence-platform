@@ -1,0 +1,25 @@
+churn_platform:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: localhost
+      port: 5432
+      user: churn
+      pass: churn
+      dbname: churn
+      schema: public
+      threads: 4
+    # step 7.3 — CI builds the transformation layer into an isolated
+    # schema (raw tables still load into `public`, matching sources.yml's
+    # hardcoded schema) rather than reusing `dev`'s schema, so a CI run
+    # can never collide with or mutate anyone's local dev state.
+    ci:
+      type: postgres
+      host: "{{ env_var('CHURN_DB_HOST', 'localhost') }}"
+      port: 5432
+      user: "{{ env_var('CHURN_DB_USER', 'churn') }}"
+      pass: "{{ env_var('CHURN_DB_PASSWORD', 'churn') }}"
+      dbname: "{{ env_var('CHURN_DB_NAME', 'churn') }}"
+      schema: test
+      threads: 4

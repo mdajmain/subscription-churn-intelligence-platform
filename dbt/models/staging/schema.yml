@@ -1,0 +1,36 @@
+version: 2
+
+models:
+  - name: stg_members
+    columns:
+      - name: msno
+        tests:
+          - unique
+          - not_null
+
+  - name: stg_transactions
+    columns:
+      - name: msno
+        tests:
+          - not_null
+      - name: transaction_date
+        tests:
+          - not_null
+      - name: payment_plan_days
+        tests:
+          - not_null
+          - accepted_values:
+              values: [7, 30, 90, 180, 410]
+      - name: is_cancel
+        tests:
+          - accepted_values:
+              values: [0, 1]
+
+  - name: stg_user_logs
+    columns:
+      - name: msno
+        tests:
+          - not_null
+      - name: date
+        tests:
+          - not_null

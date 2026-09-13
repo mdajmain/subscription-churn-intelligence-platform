@@ -1,0 +1,12 @@
+.venv/
+venv/
+data/
+notebooks/
+dbt/
+sql/
+tests/
+models/tensors/
+.git/
+.pytest_cache/
+__pycache__/
+*.pyc

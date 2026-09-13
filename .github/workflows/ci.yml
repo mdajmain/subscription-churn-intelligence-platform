@@ -1,0 +1,105 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CHURN_DB_DSN: "host=localhost port=5432 dbname=churn user=churn password=churn"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: churn
+          POSTGRES_PASSWORD: churn
+          POSTGRES_DB: churn
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U churn -d churn"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y postgresql-client
+          pip install -r requirements.txt
+
+      - name: Load schema and generate synthetic data
+        run: |
+          PGPASSWORD=churn psql -h localhost -U churn -d churn -f sql/schema.sql
+          python3 ingest/generate_synthetic_data.py
+          python3 ingest/load_to_postgres.py
+
+      - name: dbt build (dev target — populates the tables the app and tests read)
+        working-directory: dbt
+        run: dbt build --target dev
+
+      - name: Train, calibrate, and score the model (produces the artifact api/ and the tests need)
+        run: python3 models/score_predictions.py
+
+      - name: pytest
+        run: pytest tests/ -v
+
+      - name: dbt build against an isolated test schema
+        working-directory: dbt
+        run: dbt build --target ci
+        # Separate from the dev-target build above: this is specifically the
+        # guide's "dbt build against a test schema" requirement — a smoke
+        # test that the transformation layer builds cleanly in an isolated
+        # schema, independent of whatever the app's own tables are named.
+        # It intentionally doesn't feed the app or the pytest step.
+
+      - name: Build API image
+        run: docker build -t churn-platform-api:${{ github.sha }} .
+        # The Dockerfile COPYs models/artifacts/churn_model.joblib from the
+        # build context — the score_predictions.py step above must run
+        # first, same requirement as a local `docker compose build`.
+
+      - name: Replay-idempotency smoke check (redundant with pytest, kept explicit per the guide)
+        run: |
+          DATE=$(PGPASSWORD=churn psql -h localhost -U churn -d churn -tAc \
+            "select cutoff_date from fct_prediction group by cutoff_date order by count(*) desc limit 1")
+          python3 -m api.batch_score --date "$DATE"
+          COUNT1=$(PGPASSWORD=churn psql -h localhost -U churn -d churn -tAc \
+            "select count(*) from model_predictions where cutoff_date = '$DATE'")
+          python3 -m api.batch_score --date "$DATE"
+          COUNT2=$(PGPASSWORD=churn psql -h localhost -U churn -d churn -tAc \
+            "select count(*) from model_predictions where cutoff_date = '$DATE'")
+          if [ "$COUNT1" != "$COUNT2" ]; then
+            echo "Replay changed row count: $COUNT1 -> $COUNT2"
+            exit 1
+          fi
+          echo "Replay OK: $COUNT1 rows before and after."
+
+  # AWS deploy is intentionally NOT wired up yet -- infra/ has the
+  # Terraform for it, but nothing has been applied against a real AWS
+  # account (see infra/README.md and the project's build log for why:
+  # it needs an explicit go-ahead before anything gets provisioned).
+  # This job is a placeholder showing where push-to-ECR and deploy-to-ECS
+  # would go once that go-ahead happens, gated so it's a safe no-op until
+  # AWS_DEPLOY_ENABLED is deliberately set to "true" as a repo variable.
+  deploy:
+    needs: test
+    if: github.ref == 'refs/heads/main' && vars.AWS_DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Placeholder — push to ECR and deploy to ECS
+        run: |
+          echo "AWS_DEPLOY_ENABLED is true but this step is not implemented yet."
+          echo "See infra/README.md for the deploy order (billing alarm first)."
+          exit 1

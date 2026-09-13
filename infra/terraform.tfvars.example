@@ -1,0 +1,8 @@
+aws_region               = "us-east-1"
+project_name             = "churn-platform"
+billing_alarm_threshold_usd = 20
+alarm_notification_email = "you@example.com"
+db_instance_class        = "db.t3.micro"
+
+# db_password is deliberately NOT set here -- pass it via
+# TF_VAR_db_password or a gitignored terraform.tfvars, never commit it.

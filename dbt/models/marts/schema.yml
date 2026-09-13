@@ -1,0 +1,132 @@
+version: 2
+
+models:
+  - name: dim_customer
+    description: "One row per subscriber. Grain key: msno."
+    columns:
+      - name: msno
+        tests:
+          - unique
+          - not_null
+
+  - name: fct_transaction
+    description: >
+      One row per (msno, transaction_date) — deduped and same-day-collapsed
+      transaction fact. Grain uniqueness checked by
+      tests/assert_fct_transaction_grain.sql (composite key, not expressible
+      as a single-column generic test).
+    columns:
+      - name: msno
+        tests:
+          - not_null
+      - name: payment_plan_days
+        tests:
+          - not_null
+          - accepted_values:
+              values: [7, 30, 90, 180, 410]
+      - name: payment_method_id
+        tests:
+          - accepted_values:
+              values: [3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41]
+
+  - name: fct_activity_daily
+    description: One row per (msno, date) of recorded activity.
+    columns:
+      - name: msno
+        tests:
+          - not_null
+
+  - name: fct_membership_spell
+    description: >
+      One row per continuous membership spell. Grain key: (msno, spell_id).
+      Composite uniqueness checked by tests/assert_fct_membership_spell_grain.sql.
+    columns:
+      - name: msno
+        tests:
+          - not_null
+      - name: spell_expire
+        tests:
+          - not_null
+
+  - name: fct_snapshot
+    description: >
+      One row per (msno, cutoff_date) — the prediction-moment grain.
+      Composite uniqueness checked by tests/assert_fct_snapshot_grain.sql
+      (this test caught a real bug during development: 3,462 duplicate
+      groups before a second same-cutoff collapse was added).
+    columns:
+      - name: msno
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: msno
+      - name: cutoff_date
+        tests:
+          - not_null
+
+  - name: fct_prediction
+    description: >
+      Feature + prediction table. Every feature is computed with a strict
+      `< cutoff_date` filter — tests/assert_no_feature_leakage.sql is the
+      automated point-in-time cutoff test from step 3.1.
+    columns:
+      - name: msno
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: msno
+      - name: cutoff_date
+        tests:
+          - not_null
+
+  - name: mart_risk_exposure
+    description: >
+      fct_prediction + calibrated churn probability (from
+      models/score_predictions.py, joined via the ml.model_predictions
+      source) + revenue exposure (probability x expected 30-day-normalized
+      renewal value). Exclusions (zero-value transactions, irregular plan
+      lengths) produce NULL exposure, never zero -- see the model's header
+      comment. Labeled "exposure" / "at risk" throughout, never "saved":
+      no intervention has been run against this population.
+    columns:
+      - name: msno
+        tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_customer')
+                field: msno
+      - name: cutoff_date
+        tests:
+          - not_null
+
+  - name: mart_retention_curve
+    description: Churn/retention rate by payment_plan_days x tenure band, non-censored snapshots only. Feeds the Subscription Overview dashboard's retention-curve panel.
+
+  - name: mart_cohort_heatmap
+    description: Signup-cohort x months-since-signup retention matrix (% of cohort still active). Feeds the Subscription Overview dashboard's cohort heatmap.
+    columns:
+      - name: cohort_month
+        tests:
+          - not_null
+      - name: months_since_signup
+        tests:
+          - not_null
+
+  - name: mart_monthly_metrics
+    columns:
+      - name: month
+        tests:
+          - unique
+          - not_null
+
+  - name: mart_cohort_retention
+    columns:
+      - name: cohort_month
+        tests:
+          - unique
+          - not_null

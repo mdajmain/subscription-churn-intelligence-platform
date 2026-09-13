@@ -1,0 +1,43 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: public
+    tables:
+      - name: members
+      - name: transactions
+      - name: user_logs
+      - name: ground_truth_membership
+        description: >
+          Validation-only table from the synthetic data generator — the true
+          simulated expiry/churn state. Plays the role of KKBox's train_v2.csv.
+          Never referenced by any model that feeds fct_prediction.
+
+  - name: ml
+    schema: public
+    tables:
+      - name: model_predictions
+        description: >
+          Externally-loaded table: calibrated churn scores written by
+          models/score_predictions.py (offline batch scoring, not a dbt
+          model — dbt has no ML step). One row per (msno, cutoff_date)
+          matching fct_prediction's grain, sigmoid-calibrated probability
+          from the week-3 XGBoost model. Rerun the scoring script, then
+          `dbt build`, to refresh.
+        columns:
+          - name: msno
+            tests:
+              - not_null
+          - name: cutoff_date
+            tests:
+              - not_null
+          - name: calibrated_churn_probability
+            tests:
+              - not_null
+          - name: top_contributing_features
+            description: >
+              Top-3 |contribution|-ranked features from XGBoost's native
+              pred_contribs (exact SHAP values, no extra dependency), as
+              "feature:signed_contribution" pairs. Computed from the raw
+              (uncalibrated) model — calibration remaps the overall score
+              and doesn't change which features drove it.

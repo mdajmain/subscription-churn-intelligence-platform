@@ -1,0 +1,14 @@
+# Runtime dependencies for the serving path only (api/, api/batch_score.py,
+# api/scoring.py) -- the full requirements.txt also covers training/
+# analysis scripts (dbt, optuna, matplotlib, torch) that never run inside
+# the container. Kept as an explicit list rather than a grep-exclude of
+# requirements.txt, so a new training-only dependency added there doesn't
+# silently end up in the serving image by accident.
+numpy==2.5.3
+pandas==3.0.5
+psycopg2-binary==2.9.12
+scikit-learn==1.9.0
+joblib==1.6.0
+xgboost==3.4.1
+fastapi==0.141.1
+uvicorn==0.52.4

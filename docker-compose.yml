@@ -1,0 +1,31 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: churn_postgres
+    environment:
+      POSTGRES_USER: churn
+      POSTGRES_PASSWORD: churn
+      POSTGRES_DB: churn
+    ports:
+      - "5432:5432"
+    volumes:
+      - churn_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U churn -d churn"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build: .
+    container_name: churn_api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CHURN_DB_DSN: "host=postgres port=5432 dbname=churn user=churn password=churn"
+    ports:
+      - "8000:8000"
+
+volumes:
+  churn_pgdata:

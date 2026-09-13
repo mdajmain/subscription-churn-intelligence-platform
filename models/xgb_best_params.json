@@ -1,0 +1,12 @@
+{
+  "max_depth": 8,
+  "learning_rate": 0.057058425054635334,
+  "n_estimators": 182,
+  "reg_alpha": 0.5454960724088312,
+  "reg_lambda": 0.2809975286430791,
+  "subsample": 0.9009763001276623,
+  "colsample_bytree": 0.6412999567857309,
+  "scale_pos_weight": 2.3903679899676167,
+  "random_state": 42,
+  "eval_metric": "aucpr"
+}
